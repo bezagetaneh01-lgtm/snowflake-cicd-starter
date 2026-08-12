@@ -57,6 +57,14 @@ jobs:
           echo "SNOWFLAKE_PRIVATE_KEY_FILE=$RUNNER_TEMP/snowflake_key.p8" >> "$GITHUB_ENV"
 
       - name: Deploy
+        # --change-history-table below is deliberately DIFFERENT from
+        # deploy.yml's default. schemachange's "what's already applied"
+        # check has no per-database filter — it's one global table. Without
+        # this override, DEMO_DEV would share DEMO_PROD's history and
+        # schemachange would skip every migration DEMO_PROD already has,
+        # including the one that creates the database in the first place.
+        # Giving DEV its own table makes the two environments track
+        # independently, the way you'd actually expect dev/prod to behave.
         env:
           SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
           SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
@@ -71,6 +79,7 @@ jobs:
             --snowflake-authenticator snowflake_jwt \
             --snowflake-private-key-file "$SNOWFLAKE_PRIVATE_KEY_FILE" \
             --create-change-history-table \
+            --change-history-table METADATA.SCHEMACHANGE.CHANGE_HISTORY_DEV \
             --vars "{\"database_name\": \"$TARGET_DATABASE\"}"
 
       - name: Clean up private key
