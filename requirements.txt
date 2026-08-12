@@ -1,0 +1,5 @@
+# Pinned, not floating. `pip install --upgrade` in CI means the tool's
+# behaviour can change on a Tuesday with no commit from you to explain why
+# a deploy suddenly behaves differently. Bump this deliberately, in a PR,
+# when you're ready to read the schemachange changelog — not by accident.
+schemachange==4.3.3

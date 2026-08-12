@@ -1,0 +1,100 @@
+name: Deploy to Snowflake (PROD)
+
+# Push to main = deploy to DEMO_PROD. That's the whole point of this repo:
+# the thing you saw in the demo (push to git -> deploy to Snowflake) is
+# just this trigger plus the steps below, nothing more magical than that.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}  # lets you trigger it by hand from the Actions tab
+
+env:
+  TARGET_DATABASE: DEMO_PROD
+
+jobs:
+  deploy:
+    name: Deploy migrations to DEMO_PROD
+    runs-on: ubuntu-latest
+
+    # Stubbed for later: attach a GitHub Environment named "production" with
+    # a required reviewer and this job pauses for approval before running.
+    # Not configured yet (no environment protection rules set up on this
+    # repo) — this line alone does nothing until you create that Environment
+    # in Settings > Environments. Deliberately deferred, see README.
+    environment: production
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"  # schemachange requires Python 3.10+
+
+      - name: Install schemachange
+        run: pip install -r requirements.txt
+
+      - name: Stage private key
+        # env:, not inline ${{ secrets.* }} in the run: script. Inline
+        # interpolation splices the secret value directly into the shell
+        # command that GitHub Actions constructs, which can leak it into
+        # logs or make it visible to anything that can read the rendered
+        # command. Routing it through env: keeps it out of the command
+        # text — it only ever exists as a variable inside the shell.
+        env:
+          PRIVATE_KEY: ${{ secrets.SNOWFLAKE_PRIVATE_KEY }}
+        run: |
+          umask 077
+          # umask before the file is created, not a chmod after — chmod
+          # after creation leaves a window where the file is briefly
+          # world-readable. umask prevents that window from ever opening.
+          printf '%s' "$PRIVATE_KEY" > "$RUNNER_TEMP/snowflake_key.p8"
+          echo "SNOWFLAKE_PRIVATE_KEY_FILE=$RUNNER_TEMP/snowflake_key.p8" >> "$GITHUB_ENV"
+
+      - name: Dry run
+        # Read this step's log. schemachange prints exactly what it thinks
+        # needs to run and why (new files, checksum status of already-
+        # applied ones) without executing anything against Snowflake. It's
+        # the single best way to understand what the tool is actually
+        # doing on your first deploy.
+        env:
+          SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
+          SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
+          SNOWFLAKE_PRIVATE_KEY_FILE_PWD: ${{ secrets.SNOWFLAKE_PRIVATE_KEY_PASSPHRASE }}
+        run: |
+          schemachange deploy \
+            --dry-run \
+            --config-folder . \
+            --snowflake-account "$SNOWFLAKE_ACCOUNT" \
+            --snowflake-user "$SNOWFLAKE_USER" \
+            --snowflake-role DEPLOY_ROLE \
+            --snowflake-warehouse DEPLOY_WH \
+            --snowflake-authenticator snowflake_jwt \
+            --snowflake-private-key-file "$SNOWFLAKE_PRIVATE_KEY_FILE" \
+            --create-change-history-table \
+            --vars "{\"database_name\": \"$TARGET_DATABASE\"}"
+
+      - name: Deploy
+        env:
+          SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
+          SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
+          SNOWFLAKE_PRIVATE_KEY_FILE_PWD: ${{ secrets.SNOWFLAKE_PRIVATE_KEY_PASSPHRASE }}
+        run: |
+          schemachange deploy \
+            --config-folder . \
+            --snowflake-account "$SNOWFLAKE_ACCOUNT" \
+            --snowflake-user "$SNOWFLAKE_USER" \
+            --snowflake-role DEPLOY_ROLE \
+            --snowflake-warehouse DEPLOY_WH \
+            --snowflake-authenticator snowflake_jwt \
+            --snowflake-private-key-file "$SNOWFLAKE_PRIVATE_KEY_FILE" \
+            --create-change-history-table \
+            --vars "{\"database_name\": \"$TARGET_DATABASE\"}"
+
+      - name: Clean up private key
+        # Runner is ephemeral and torn down after the job regardless, but
+        # don't leave a key file sitting around for the rest of this job's
+        # lifetime any longer than necessary.
+        if: always()
+        run: rm -f "$RUNNER_TEMP/snowflake_key.p8"

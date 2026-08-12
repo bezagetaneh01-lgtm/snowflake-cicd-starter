@@ -1,0 +1,16 @@
+# Private key material. None of this should ever be committed — the
+# workflow writes the key to a runner temp file at deploy time and it never
+# touches the working tree. These patterns are a backstop, not the primary
+# control.
+*.p8
+*.pem
+*.key
+
+# Plaintext connection profiles (can contain account/user/passphrase).
+connections.toml
+
+# Common editor/OS noise.
+.DS_Store
+.vscode/
+__pycache__/
+*.pyc

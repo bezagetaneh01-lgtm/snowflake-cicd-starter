@@ -1,0 +1,78 @@
+name: Validate (PR)
+
+# Opening/updating a PR against main = lint, then a real (but disposable)
+# deploy to DEMO_DEV. This is what lets you see "did my migration actually
+# work" before it ever touches DEMO_PROD.
+on:
+  pull_request:
+    branches: [main]
+
+env:
+  TARGET_DATABASE: DEMO_DEV
+
+jobs:
+  lint:
+    name: Lint migrations
+    runs-on: ubuntu-latest
+    # No credentials in this job at all — not even loaded as secrets. It
+    # can't accidentally leak what it doesn't have. Filename/duplicate-
+    # version/edited-migration mistakes fail here, in seconds, before
+    # anything spins up a warehouse and burns a trial credit.
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # full history needed to diff against origin/main
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Run lint checks
+        run: python scripts/lint_migrations.py --base-ref origin/${{ github.base_ref }}
+
+  deploy:
+    name: Deploy migrations to DEMO_DEV
+    needs: lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install schemachange
+        run: pip install -r requirements.txt
+
+      - name: Stage private key
+        env:
+          PRIVATE_KEY: ${{ secrets.SNOWFLAKE_PRIVATE_KEY }}
+        run: |
+          umask 077
+          printf '%s' "$PRIVATE_KEY" > "$RUNNER_TEMP/snowflake_key.p8"
+          echo "SNOWFLAKE_PRIVATE_KEY_FILE=$RUNNER_TEMP/snowflake_key.p8" >> "$GITHUB_ENV"
+
+      - name: Deploy
+        env:
+          SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
+          SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
+          SNOWFLAKE_PRIVATE_KEY_FILE_PWD: ${{ secrets.SNOWFLAKE_PRIVATE_KEY_PASSPHRASE }}
+        run: |
+          schemachange deploy \
+            --config-folder . \
+            --snowflake-account "$SNOWFLAKE_ACCOUNT" \
+            --snowflake-user "$SNOWFLAKE_USER" \
+            --snowflake-role DEPLOY_ROLE \
+            --snowflake-warehouse DEPLOY_WH \
+            --snowflake-authenticator snowflake_jwt \
+            --snowflake-private-key-file "$SNOWFLAKE_PRIVATE_KEY_FILE" \
+            --create-change-history-table \
+            --vars "{\"database_name\": \"$TARGET_DATABASE\"}"
+
+      - name: Clean up private key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/snowflake_key.p8"

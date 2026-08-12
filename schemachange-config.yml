@@ -1,0 +1,39 @@
+# schemachange-config.yml
+#
+# config-version 2 (current schema as of schemachange 4.3.3 — the v1 config
+# format is a different, older shape; don't mix examples from the two).
+#
+# Connection details (account, user, role, warehouse, private key path) are
+# deliberately ABSENT from this file. Every one of those is passed as a
+# --snowflake-* CLI flag from the GitHub Actions workflow instead, sourced
+# from GitHub Secrets. That's what keeps this file identical across DEV and
+# PROD deploys and safe to commit — there is nothing in here that identifies
+# an account or environment, let alone a credential.
+
+config_version: 2
+
+# Where schemachange looks for V/R/A migration files, relative to this file.
+root_folder: migrations
+
+# Database + schema that hold schemachange's own change-history table.
+# Must match what setup/00_bootstrap.sql created. schemachange can create
+# the SCHEMACHANGE schema and table for you (--create-change-history-table),
+# but it will never create the METADATA database — that's why the bootstrap
+# step exists.
+snowflake_change_history_table:
+  database_name: METADATA
+  schema_name: SCHEMACHANGE
+  table_name: CHANGE_HISTORY
+
+# Jinja variables available inside migration files as {{ database_name }}.
+# Overridden per-environment at deploy time via --vars from the workflow
+# (TARGET_DATABASE env var -> DEMO_DEV on a PR, DEMO_PROD on main). The
+# value here is just the default/local fallback.
+vars:
+  database_name: DEMO_DEV
+
+# Fail the deploy if a migration file's on-disk checksum no longer matches
+# what's recorded in change history for an already-applied V-script. This
+# is the mechanism behind "never edit an applied migration" — it's not a
+# convention we're trusting people to follow, schemachange enforces it.
+autocommit: true
