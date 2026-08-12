@@ -10,7 +10,7 @@
 # PROD deploys and safe to commit — there is nothing in here that identifies
 # an account or environment, let alone a credential.
 
-config_version: 2
+config-version: 2
 
 # Where schemachange looks for V/R/A migration files, relative to this file.
 root_folder: migrations
@@ -25,7 +25,14 @@ snowflake_change_history_table:
   schema_name: SCHEMACHANGE
   table_name: CHANGE_HISTORY
 
-# Jinja variables available inside migration files as {{ database_name }}.
+# Jinja variables available inside migration files, referenced via
+# double-curly-brace syntax around the name: database_name.
+# NOTE: this file itself is Jinja-rendered by schemachange before being
+# parsed as YAML (that's how JinjaEnvVar lets a config file read env vars).
+# That means literal double-curly-brace syntax MUST NOT appear anywhere in
+# this file, including in comments like this one — schemachange doesn't
+# know "this is a YAML comment," it just sees Jinja delimiters and tries to
+# evaluate them.
 # Overridden per-environment at deploy time via --vars from the workflow
 # (TARGET_DATABASE env var -> DEMO_DEV on a PR, DEMO_PROD on main). The
 # value here is just the default/local fallback.
